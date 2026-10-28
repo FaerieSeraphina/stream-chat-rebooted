@@ -1687,164 +1687,156 @@
                 };
 
                 socket.onmessage = async (event) => {
-                    const wsdata = JSON.parse(event.data);
+                    let wsdata;
+                    try {
+                        wsdata = JSON.parse(event.data);
 
-                    console.debug(['Event', wsdata]);
+                        console.debug(['Event', wsdata]);
 
-                    if (wsdata.id === 'obs-chat') {
-                        console.debug([`SUBSCRIBE: ${wsdata.status}`, wsdata]);
-                    } else if (wsdata.event) {
-                        if (wsdata.event.source === 'Twitch') {
-                            if (wsdata.event.type === 'ChatMessage') {
-                                let m = normalize_twitch_chat_payload(wsdata.data);
+                        if (wsdata.id === 'obs-chat') {
+                            console.debug([`SUBSCRIBE: ${wsdata.status}`, wsdata]);
+                        } else if (wsdata.event) {
+                            if (wsdata.event.source === 'Twitch') {
+                                if (wsdata.event.type === 'ChatMessage') {
+                                    let m = normalize_twitch_chat_payload(wsdata.data);
 
-                                StreamerBot['message']['twitch'](m.msgId, m.userId, m.displayName,
-                                    m.color, m.message, m.emotes, m.role, m.badges,
-                                    m.isHighlighted ? Highlights.Highlight : Highlights.None, false,
-                                    m.avatar, m.aliases);
+                                    StreamerBot['message']['twitch'](m.msgId, m.userId, m.displayName,
+                                        m.color, m.message, m.emotes, m.role, m.badges,
+                                        m.isHighlighted ? Highlights.Highlight : Highlights.None, false,
+                                        m.avatar, m.aliases);
 
-                            } else if (wsdata.event.type === 'Announcement') {
-                                if (config["ui"]["announcements"] === false) {
-                                    return;
+                                } else if (wsdata.event.type === 'Announcement') {
+                                    if (config["ui"]["announcements"] === false) {
+                                        // Skip rendering, but do not return — we still want cleanup below
+                                    } else {
+                                        let m = normalize_twitch_chat_payload(wsdata.data);
+
+                                        let color = '';
+                                        switch (String(wsdata.data?.announcementColor || '').toLowerCase()) {
+                                            case 'blue':   color = '#0099ff'; break;
+                                            case 'green':  color = '#00ff00'; break;
+                                            case 'orange': color = '#ff9900'; break;
+                                            case 'purple': color = '#9900ff'; break;
+                                            default:       color = m.color;  break;
+                                        }
+
+                                        StreamerBot['message']['twitch'](m.msgId, m.userId, m.displayName, color,
+                                            m.message, m.emotes, m.role, m.badges, Highlights.Announcement, false,
+                                            m.avatar, m.aliases);
+                                    }
+
+                                } else if (wsdata.event.type === 'UserTimedOut' || wsdata.event.type === 'UserBanned') {
+                                    console.debug(['User timed out or banned', wsdata]);
+                                    remove_messages_by_user_id(pick_first(
+                                        wsdata.data.userId,
+                                        wsdata.data.user?.id,
+                                        wsdata.data.targetUserId,
+                                        wsdata.data.targetUser?.id
+                                    ));
+                                } else if (wsdata.event.type === 'ChatMessageDeleted') {
+                                    console.debug(['Message deleted', wsdata]);
+                                    remove_messages_by_message_id(pick_first(
+                                        wsdata.data.targetMessageId,
+                                        wsdata.data.messageId,
+                                        wsdata.data.msgId,
+                                        wsdata.data.eventId
+                                    ));
+                                } else {
+                                    console.warn(['Twitch Event not implemented', wsdata.event]);
                                 }
+                            } else if (wsdata.event.source === 'YouTube') {
+                                if (wsdata.event.type === 'Message') {
+                                    let m = wsdata.data;
 
-                                let m = normalize_twitch_chat_payload(wsdata.data);
-
-                                let color = '';
-                                switch (String(wsdata.data?.announcementColor || '').toLowerCase()) {
-                                    case 'blue':
-                                        color = '#0099ff';
-                                        break;
-                                    case 'green':
-                                        color = '#00ff00';
-                                        break;
-                                    case 'orange':
-                                        color = '#ff9900';
-                                        break;
-                                    case 'purple':
-                                        color = '#9900ff';
-                                        break;
-                                    default:
-                                        color = m.color;
-                                        break;
-                                }
-
-                                StreamerBot['message']['twitch'](m.msgId, m.userId, m.displayName, color,
-                                    m.message, m.emotes, m.role, m.badges, Highlights.Announcement, false,
-                                    m.avatar, m.aliases);
-
-                            } else if (wsdata.event.type === 'UserTimedOut' || wsdata.event.type ===
-                                'UserBanned') {
-                                console.debug(['User timed out or banned', wsdata]);
-                                remove_messages_by_user_id(pick_first(
-                                    wsdata.data.userId,
-                                    wsdata.data.user?.id,
-                                    wsdata.data.targetUserId,
-                                    wsdata.data.targetUser?.id
-                                ));
-                            } else if (wsdata.event.type === 'ChatMessageDeleted') {
-                                console.debug(['Message deleted', wsdata]);
-                                remove_messages_by_message_id(pick_first(
-                                    wsdata.data.targetMessageId,
-                                    wsdata.data.messageId,
-                                    wsdata.data.msgId,
-                                    wsdata.data.eventId
-                                ));
-                            } else {
-                                console.warn(['Twitch Event not implemented', wsdata.event]);
-                            }
-                        } else if (wsdata.event.source === 'YouTube') {
-                            if (wsdata.event.type === 'Message') {
-                                let m = wsdata.data;
-
-                                if (skip_message(m.message, [
-                                    m.user?.name,
-                                    m.user?.displayName,
-                                    m.user?.channelId,
-                                    m.user?.id,
-                                    m.channelId,
-                                    m.userId
-                                ])) {
-                                    return;
-                                }
-
-                                StreamerBot['message']['youtube'](m.eventId, m.user.id, m.user.name, m.message, 0,
-                                    m.user.isOwner, m.user.isModerator, m.user.isSponsor, m.user.isVerified,
-                                    avatar_url(m.user, m), [
+                                    if (skip_message(m.message, [
+                                        m.user?.name,
                                         m.user?.displayName,
                                         m.user?.channelId,
+                                        m.user?.id,
                                         m.channelId,
                                         m.userId
-                                    ]);
-                            } else if (wsdata.event.type === 'MessageDeleted') {
-                                console.debug(['Message deleted', wsdata]);
-                                remove_messages_by_message_id(pick_first(
-                                    wsdata.data.eventId,
-                                    wsdata.data.messageId,
-                                    wsdata.data.message?.id,
-                                    wsdata.data.targetMessageId,
-                                    wsdata.data.targetMessage?.id
-                                ));
-                            } else if (wsdata.event.type === 'UserBanned' || wsdata.event.type === 'UserTimedOut') {
-                                console.debug(['YouTube user banned or timed out', wsdata]);
-                                remove_messages_by_user_id(pick_first(
-                                    wsdata.data.user?.id,
-                                    wsdata.data.userId,
-                                    wsdata.data.targetUserId,
-                                    wsdata.data.targetUser?.id,
-                                    wsdata.data.channelId,
-                                    wsdata.data.user?.channelId
-                                ));
-                            } else {
-                                console.warn(['YouTube Event not implemented', wsdata.event]);
-                            }
-                        } else if (wsdata.event.source === 'Kick') {
-                            if (wsdata.event.type === 'ChatMessage' || wsdata.event.type === 'Message') {
-                                let m = wsdata.data.message || wsdata.data;
-                                let user = m.user;
-                                let user_name = typeof user === 'string'
-                                    ? user
-                                    : user?.name || user?.displayName || user?.user || m.userName || m.displayName || m.username;
-                                let user_id = user?.id || user?.userId || m.userId;
-                                user_name = user_name || 'Kick User';
-                                user_id = user_id || user_name;
+                                    ])) {
+                                        // Skip rendering, but fall through to cleanup
+                                    } else {
+                                        StreamerBot['message']['youtube'](m.eventId, m.user.id, m.user.name, m.message, 0,
+                                            m.user.isOwner, m.user.isModerator, m.user.isSponsor, m.user.isVerified,
+                                            avatar_url(m.user, m), [
+                                                m.user?.displayName,
+                                                m.user?.channelId,
+                                                m.channelId,
+                                                m.userId
+                                            ]);
+                                    }
+                                } else if (wsdata.event.type === 'MessageDeleted') {
+                                    console.debug(['Message deleted', wsdata]);
+                                    remove_messages_by_message_id(pick_first(
+                                        wsdata.data.eventId,
+                                        wsdata.data.messageId,
+                                        wsdata.data.message?.id,
+                                        wsdata.data.targetMessageId,
+                                        wsdata.data.targetMessage?.id
+                                    ));
+                                } else if (wsdata.event.type === 'UserBanned' || wsdata.event.type === 'UserTimedOut') {
+                                    console.debug(['YouTube user banned or timed out', wsdata]);
+                                    remove_messages_by_user_id(pick_first(
+                                        wsdata.data.user?.id,
+                                        wsdata.data.userId,
+                                        wsdata.data.targetUserId,
+                                        wsdata.data.targetUser?.id,
+                                        wsdata.data.channelId,
+                                        wsdata.data.user?.channelId
+                                    ));
+                                } else {
+                                    console.warn(['YouTube Event not implemented', wsdata.event]);
+                                }
+                            } else if (wsdata.event.source === 'Kick') {
+                                if (wsdata.event.type === 'ChatMessage' || wsdata.event.type === 'Message') {
+                                    let m = wsdata.data.message || wsdata.data;
+                                    let user = m.user;
+                                    let user_name = typeof user === 'string'
+                                        ? user
+                                        : user?.name || user?.displayName || user?.user || m.userName || m.displayName || m.username;
+                                    let user_id = user?.id || user?.userId || m.userId;
+                                    user_name = user_name || 'Kick User';
+                                    user_id = user_id || user_name;
 
-                                StreamerBot['message']['kick'](
-                                    m.messageId || m.msgId || m.eventId || String(Date.now()),
-                                    user_id,
-                                    user_name,
-                                    m.message || m.rawInput || '',
-                                    m.color,
-                                    m.emotes || [],
-                                    m.badge || m.badges || [],
-                                    false,
-                                    avatar_url(user, m),
-                                    [
-                                        typeof user === 'object' ? user?.displayName : null,
-                                        typeof user === 'object' ? user?.login : null,
-                                        typeof user === 'object' ? user?.username : null,
-                                        m.displayName,
-                                        m.username,
-                                        m.userName,
-                                        m.login
-                                    ]
-                                );
-                            } else if (wsdata.event.type === 'UserTimedOut' || wsdata.event.type === 'UserBanned') {
-                                console.debug(['Kick user timed out or banned', wsdata]);
-                                remove_messages_by_user_id(wsdata.data.userId || wsdata.data.user?.id);
-                            } else {
-                                console.warn(['Kick Event not implemented', wsdata.event]);
+                                    StreamerBot['message']['kick'](
+                                        m.messageId || m.msgId || m.eventId || String(Date.now()),
+                                        user_id,
+                                        user_name,
+                                        m.message || m.rawInput || '',
+                                        m.color,
+                                        m.emotes || [],
+                                        m.badge || m.badges || [],
+                                        false,
+                                        avatar_url(user, m),
+                                        [
+                                            typeof user === 'object' ? user?.displayName : null,
+                                            typeof user === 'object' ? user?.login : null,
+                                            typeof user === 'object' ? user?.username : null,
+                                            m.displayName,
+                                            m.username,
+                                            m.userName,
+                                            m.login
+                                        ]
+                                    );
+                                } else if (wsdata.event.type === 'UserTimedOut' || wsdata.event.type === 'UserBanned') {
+                                    console.debug(['Kick user timed out or banned', wsdata]);
+                                    remove_messages_by_user_id(wsdata.data.userId || wsdata.data.user?.id);
+                                } else {
+                                    console.warn(['Kick Event not implemented', wsdata.event]);
+                                }
                             }
+                        } else {
+                            console.warn(['Event source not implemented', wsdata.event]);
                         }
-                    } else {
-                        console.warn(['Event source not implemented', wsdata.event]);
+                    } catch (err) {
+                        console.error('Failed to handle Streamer.Bot event', err, wsdata ?? event.data);
                     }
 
-                    // The browser is creating elements faster than it can count them
-                    // If we don't wait a bit, the message count will be wrong and 
-                    // some messages won't be removed according to the user's settings
+                    // Always run cleanup — even after a skipped or failed event
                     setTimeout(remove_old_messages, 400);
-                }
+                };
             }
 
             if (config['plugins']['beanbot']['enabled'] === true) {
